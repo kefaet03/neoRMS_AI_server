@@ -12,10 +12,15 @@ class RecommendRequest(BaseModel):
     The recommendation engine uses conditional probability
     to suggest items based on what the customer has already ordered.
     """
+    restaurant_id: str = Field(
+        ...,
+        description="The restaurant ID to get recommendations for",
+        examples=["R1"]
+    )
     already_ordered: list[str] = Field(
         default_factory=list,
-        description="List of items already ordered by the customer",
-        examples=[["Kacchi Biryani", "Borhani"]]
+        description="List of menuItemIds already ordered by the customer",
+        examples=[["M101", "M104"]]
     )
     num_recommendations: int = Field(
         default=3,
@@ -27,7 +32,8 @@ class RecommendRequest(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
-                "already_ordered": ["Kacchi Biryani", "Borhani"],
+                "restaurant_id": "R1",
+                "already_ordered": ["M101", "M104"],
                 "num_recommendations": 3
             }
         }
@@ -37,18 +43,23 @@ class RecommendationData(BaseModel):
     """Response data containing recommendations."""
     recommendations: list[str] = Field(
         ...,
-        description="List of recommended food items"
+        description="List of recommended menuItemIds"
     )
     based_on: list[str] = Field(
         ...,
-        description="Items the recommendations are based on"
+        description="MenuItemIds the recommendations are based on"
+    )
+    restaurant_id: str = Field(
+        ...,
+        description="The restaurant ID the recommendations are for"
     )
     
     class Config:
         json_schema_extra = {
             "example": {
-                "recommendations": ["Chicken Roast", "Morog Polao", "Beef Bhuna"],
-                "based_on": ["Kacchi Biryani", "Borhani"]
+                "recommendations": ["M103", "M107", "M105"],
+                "based_on": ["M101", "M104"],
+                "restaurant_id": "R1"
             }
         }
 

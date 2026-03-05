@@ -1,87 +1,60 @@
 """
 Food Recommendation Service.
 Uses conditional probability to recommend food items based on order history.
+Fetches order history from SQLite database per restaurant.
 """
 
+import json
 import logging
+import sqlite3
 from collections import defaultdict
+from pathlib import Path
 from typing import Set
 
 logger = logging.getLogger(__name__)
 
 
-# Sample order history for the recommendation engine
-# In production, this would be loaded from a database
-# DEFAULT_ORDER_HISTORY = {
-#     "ORD1001": ["Kacchi Biryani", "Borhani", "Chicken Roast"],
-#     "ORD1002": ["Beef Tehari", "Chicken Reshmi Kebab", "Firni"],
-#     "ORD1003": ["Butter Chicken", "Garlic Naan", "Chicken Tikka Masala", "Mango Lassi"],
-#     "ORD1004": ["Morog Polao", "Beef Bhuna", "Plain Rice", "Salad"],
-#     "ORD1005": ["Shorshe Ilish", "Steamed Rice", "Dal", "Begun Bharta"],
-#     "ORD1006": ["Chicken Burger", "French Fries", "Coke"],
-#     "ORD1007": ["BBQ Chicken Pizza", "Chicken Wings", "Cold Coffee"],
-#     "ORD1008": ["Beef Steak", "Mashed Potato", "Sauteed Vegetables", "Lemonade"],
-#     "ORD1009": ["Chicken Alfredo Pasta", "Garlic Bread", "Chocolate Milkshake"],
-#     "ORD1010": ["Falooda", "Fuchka", "Chotpoti"],
-#     "ORD1011": ["Mixed Fried Rice", "Thai Soup", "Chicken Fry"],
-#     "ORD1012": ["Grilled Chicken Sandwich", "Onion Rings", "Iced Tea"],
-#     "ORD1013": ["Beef Kala Bhuna", "Tandoori Roti", "Borhani"],
-#     "ORD1014": ["Prawn Malai Curry", "Polao Rice", "Green Salad"],
-#     "ORD1015": ["Cheese Pasta", "BBQ Chicken Wrap", "Mocha Coffee"],
-# }
+# Path to SQLite database
+DB_PATH = Path(__file__).parent.parent.parent / "orders.db"
 
-DEFAULT_ORDER_HISTORY = {
-    "ORD1001": ["001", "002", "014"],  # Kacchi Biryani, Borhani, Salad
-    "ORD1002": ["008", "007", "021"],  # Garlic Naan, Butter Chicken, Coke
-    "ORD1003": ["025", "042", "045", "006"],  # Beef Steak, Tandoori Roti, Green Salad, Firni
-    "ORD1004": ["019", "020", "021"],  # Chicken Burger, French Fries, Coke
-    "ORD1005": ["011", "002", "014"],  # Morog Polao, Borhani, Salad
-    "ORD1006": ["009", "008", "030"],  # Chicken Tikka Masala, Garlic Naan, Garlic Bread
-    "ORD1007": ["004", "016", "017"],  # Beef Tehari, Steamed Rice, Dal
-    "ORD1008": ["022", "039", "040"],  # BBQ Chicken Pizza, Onion Rings, Iced Tea
-    "ORD1009": ["033", "034", "028"],  # Fuchka, Chotpoti, Lemonade
-    "ORD1010": ["037", "020", "021"],  # Chicken Fry, French Fries, Coke
-    "ORD1011": ["043", "044", "014"],  # Prawn Malai Curry, Polao Rice, Salad
-    "ORD1012": ["029", "030", "031"],  # Chicken Alfredo Pasta, Garlic Bread, Chocolate Milkshake
-    "ORD1013": ["041", "016", "017"],  # Beef Kala Bhuna, Steamed Rice, Dal
-    "ORD1014": ["005", "001", "002"],  # Chicken Reshmi Kebab, Kacchi Biryani, Borhani
-    "ORD1015": ["023", "020", "028"],  # Chicken Wings, French Fries, Lemonade
-    "ORD1016": ["035", "036", "014"],  # Mixed Fried Rice, Thai Soup, Salad
-    "ORD1017": ["047", "039", "048"],  # BBQ Chicken Wrap, Onion Rings, Mocha Coffee
-    "ORD1018": ["015", "016", "017"],  # Shorshe Ilish, Steamed Rice, Dal
-    "ORD1019": ["038", "020", "040"],  # Grilled Chicken Sandwich, French Fries, Iced Tea
-    "ORD1020": ["032", "010"],  # Falooda, Mango Lassi
-    "ORD1021": ["025", "026", "027"],  # Beef Steak, Mashed Potato, Sauteed Vegetables
-    "ORD1022": ["007", "008", "014"],  # Butter Chicken, Garlic Naan, Salad
-    "ORD1023": ["001", "002"],  # Kacchi Biryani, Borhani
-    "ORD1024": ["019", "021"],  # Chicken Burger, Coke
-    "ORD1025": ["011", "014"],  # Morog Polao, Salad
-    "ORD1026": ["009", "030"],  # Chicken Tikka Masala, Garlic Bread
-    "ORD1027": ["004", "017"],  # Beef Tehari, Dal
-    "ORD1028": ["022", "040"],  # BBQ Chicken Pizza, Iced Tea
-    "ORD1029": ["033", "028"],  # Fuchka, Lemonade
-    "ORD1030": ["037", "021"],  # Chicken Fry, Coke
-    "ORD1031": ["043", "044"],  # Prawn Malai Curry, Polao Rice
-    "ORD1032": ["029", "031"],  # Chicken Alfredo Pasta, Chocolate Milkshake
-    "ORD1033": ["041", "016"],  # Beef Kala Bhuna, Steamed Rice
-    "ORD1034": ["005", "002"],  # Chicken Reshmi Kebab, Borhani
-    "ORD1035": ["023", "028"],  # Chicken Wings, Lemonade
-    "ORD1036": ["035", "014"],  # Mixed Fried Rice, Salad
-    "ORD1037": ["047", "048"],  # BBQ Chicken Wrap, Mocha Coffee
-    "ORD1038": ["015", "017"],  # Shorshe Ilish, Dal
-    "ORD1039": ["038", "040"],  # Grilled Chicken Sandwich, Iced Tea
-    "ORD1040": ["032", "006"],  # Falooda, Firni
-    "ORD1041": ["025", "027"],  # Beef Steak, Sauteed Vegetables
-    "ORD1042": ["007", "014"],  # Butter Chicken, Salad
-    "ORD1043": ["001", "014"],  # Kacchi Biryani, Salad
-    "ORD1044": ["019", "020"],  # Chicken Burger, French Fries
-    "ORD1045": ["011", "002"],  # Morog Polao, Borhani
-    "ORD1046": ["009", "008"],  # Chicken Tikka Masala, Garlic Naan
-    "ORD1047": ["004", "016"],  # Beef Tehari, Steamed Rice
-    "ORD1048": ["022", "039"],  # BBQ Chicken Pizza, Onion Rings
-    "ORD1049": ["033", "034"],  # Fuchka, Chotpoti
-    "ORD1050": ["037", "020", "021"]  # Chicken Fry, French Fries, Coke
-}
+
+def get_order_history_from_db(restaurant_id: str) -> dict[str, list[str]]:
+    """
+    Fetch order history for a specific restaurant from SQLite database.
+    
+    Args:
+        restaurant_id: The restaurant ID to filter by
+        
+    Returns:
+        Dictionary mapping order_id to list of menuItemIds
+        Format: {"001": ["M101", "M104"], "002": ["M102", "M106"]}
+    """
+    if not DB_PATH.exists():
+        logger.warning(f"Database not found at {DB_PATH}. Run db_preprocessing.py first.")
+        return {}
+    
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            "SELECT order_id, items FROM orders WHERE restaurant_id = ?",
+            (restaurant_id,)
+        )
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        order_history = {}
+        for order_id, items_json in rows:
+            order_history[order_id] = json.loads(items_json)
+        
+        logger.info(f"Loaded {len(order_history)} orders for restaurant {restaurant_id}")
+        return order_history
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch order history: {e}")
+        return {}
 
 
 class RecommendationService:
@@ -92,15 +65,16 @@ class RecommendationService:
     food items based on what the customer has already ordered.
     """
     
-    def __init__(self, order_history: dict = None):
+    def __init__(self, order_history: dict[str, list[str]], restaurant_id: str):
         """
         Initialize the recommendation engine.
         
         Args:
-            order_history: Dictionary mapping order IDs to list of items.
-                          If None, uses default sample data.
+            order_history: Dictionary mapping order IDs to list of menuItemIds.
+            restaurant_id: The restaurant ID this service is for.
         """
-        self.order_history = order_history or DEFAULT_ORDER_HISTORY
+        self.order_history = order_history
+        self.restaurant_id = restaurant_id
         self.item_frequency: dict[str, int] = defaultdict(int)
         self.co_occurrence: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
         self.total_orders = len(self.order_history)
@@ -230,13 +204,61 @@ class RecommendationService:
         return self._is_initialized
 
 
-# Singleton instance
-_recommendation_service: RecommendationService | None = None
+# Cache for recommendation services per restaurant
+_recommendation_services: dict[str, RecommendationService] = {}
 
 
-def get_recommendation_service() -> RecommendationService:
-    """Get the singleton recommendation service instance."""
-    global _recommendation_service
-    if _recommendation_service is None:
-        _recommendation_service = RecommendationService()
-    return _recommendation_service
+def get_recommendation_service(restaurant_id: str) -> RecommendationService:
+    """
+    Get or create a recommendation service for a specific restaurant.
+    
+    Fetches order history from SQLite database and caches the service.
+    
+    Args:
+        restaurant_id: The restaurant ID to get recommendations for
+        
+    Returns:
+        RecommendationService instance for the restaurant
+        
+    Raises:
+        ValueError: If no order history found for the restaurant
+    """
+    global _recommendation_services
+    
+    # Return cached service if available
+    if restaurant_id in _recommendation_services:
+        logger.debug(f"Using cached recommendation service for {restaurant_id}")
+        return _recommendation_services[restaurant_id]
+    
+    # Fetch order history from database
+    order_history = get_order_history_from_db(restaurant_id)
+    
+    if not order_history:
+        raise ValueError(f"No order history found for restaurant: {restaurant_id}")
+    
+    # Create and cache the service
+    service = RecommendationService(order_history, restaurant_id)
+    service.initialize()
+    _recommendation_services[restaurant_id] = service
+    
+    logger.info(f"Created new recommendation service for restaurant {restaurant_id}")
+    return service
+
+
+def clear_recommendation_cache(restaurant_id: str = None) -> None:
+    """
+    Clear the recommendation service cache.
+    
+    Args:
+        restaurant_id: If provided, only clear cache for this restaurant.
+                      If None, clear all cached services.
+    """
+    global _recommendation_services
+    
+    if restaurant_id:
+        if restaurant_id in _recommendation_services:
+            del _recommendation_services[restaurant_id]
+            logger.info(f"Cleared recommendation cache for {restaurant_id}")
+    else:
+        _recommendation_services.clear()
+        logger.info("Cleared all recommendation caches")
