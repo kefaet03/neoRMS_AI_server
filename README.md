@@ -190,20 +190,21 @@ Invoke-RestMethod -Uri "http://localhost:8888/analyze-review" -Method Post -Body
         "kept_reviews": 3,
         "ignored_reviews": 0,
         "total_complaints": 3,
-        "complaints": [
-            {"item": "burger", "issue": "cold", "category": "temperature"},
-            {"item": "burger", "issue": "tasteless", "category": "taste"},
-            {"item": "food", "issue": "stale", "category": "taste"}
-        ],
-        "complaints_grouped": {
-            "burger": {
-                "cold": {"count": 1, "category": "temperature"},
-                "tasteless": {"count": 1, "category": "taste"}
+        "complaints_grouped": [
+            {
+                "foodName": "burger",
+                "issues": [
+                    {"issue": "cold", "count": 1, "category": "temperature"},
+                    {"issue": "tasteless", "count": 1, "category": "taste"}
+                ]
             },
-            "food": {
-                "stale": {"count": 1, "category": "taste"}
+            {
+                "foodName": "food",
+                "issues": [
+                    {"issue": "stale", "count": 1, "category": "taste"}
+                ]
             }
-        }
+        ]
     },
     "message": "Analyzed 3 reviews, extracted 3 complaints"
 }

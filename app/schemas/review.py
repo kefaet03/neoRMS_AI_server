@@ -57,19 +57,28 @@ class ComplaintSummary(BaseModel):
     category: str = Field(..., description="Complaint category")
 
 
+class IssueDetail(BaseModel):
+    """Individual issue within a food item."""
+    issue: str = Field(..., description="The specific issue or complaint")
+    count: int = Field(..., ge=1, description="Number of occurrences")
+    category: str = Field(..., description="Complaint category")
+
+
+class FoodComplaint(BaseModel):
+    """Complaints grouped by food item."""
+    foodName: str = Field(..., description="The food item name")
+    issues: list[IssueDetail] = Field(..., description="List of issues for this food item")
+
+
 class ReviewAnalysisData(BaseModel):
     """Response data containing analysis results."""
     total_reviews: int = Field(..., description="Total number of reviews submitted")
     kept_reviews: int = Field(..., description="Number of reviews that were analyzed")
     ignored_reviews: int = Field(..., description="Number of reviews filtered out (too short, etc.)")
     total_complaints: int = Field(..., description="Total number of complaints extracted")
-    complaints: list[Complaint] = Field(
+    complaints_grouped: list[FoodComplaint] = Field(
         default_factory=list,
-        description="List of extracted complaints"
-    )
-    complaints_grouped: dict = Field(
-        default_factory=dict,
-        description="Complaints grouped by item and issue"
+        description="Complaints grouped by food item with issues array"
     )
     
     class Config:
@@ -79,13 +88,21 @@ class ReviewAnalysisData(BaseModel):
                 "kept_reviews": 4,
                 "ignored_reviews": 1,
                 "total_complaints": 3,
-                "complaints": [
-                    {"item": "burger", "issue": "cold", "category": "temperature"},
-                    {"item": "service", "issue": "slow", "category": "service"}
-                ],
-                "complaints_grouped": {
-                    "burger": {"cold": {"count": 1, "category": "temperature"}}
-                }
+                "complaints_grouped": [
+                    {
+                        "foodName": "burger",
+                        "issues": [
+                            {"issue": "cold", "count": 1, "category": "temperature"},
+                            {"issue": "tasteless", "count": 1, "category": "taste"}
+                        ]
+                    },
+                    {
+                        "foodName": "food",
+                        "issues": [
+                            {"issue": "stale", "count": 1, "category": "taste"}
+                        ]
+                    }
+                ]
             }
         }
 

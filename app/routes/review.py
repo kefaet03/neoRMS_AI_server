@@ -9,7 +9,8 @@ from ..schemas.review import (
     AnalyzeReviewRequest,
     AnalyzeReviewResponse,
     ReviewAnalysisData,
-    Complaint,
+    FoodComplaint,
+    IssueDetail,
 )
 from ..services.review_service import get_review_service
 
@@ -61,16 +62,21 @@ async def analyze_reviews(request: AnalyzeReviewRequest) -> AnalyzeReviewRespons
         
         result = await service.analyze(request.reviews)
         
-        # Convert complaint dicts to Complaint objects
-        complaints = [Complaint(**c) for c in result["complaints"]]
+        # Convert complaints_grouped to FoodComplaint objects
+        complaints_grouped = [
+            FoodComplaint(
+                foodName=item["foodName"],
+                issues=[IssueDetail(**issue) for issue in item["issues"]]
+            )
+            for item in result["complaints_grouped"]
+        ]
         
         analysis_data = ReviewAnalysisData(
             total_reviews=result["total_reviews"],
             kept_reviews=result["kept_reviews"],
             ignored_reviews=result["ignored_reviews"],
             total_complaints=result["total_complaints"],
-            complaints=complaints,
-            complaints_grouped=result["complaints_grouped"],
+            complaints_grouped=complaints_grouped,
         )
         
         logger.info(

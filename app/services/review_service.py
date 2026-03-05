@@ -129,7 +129,7 @@ class ReviewAnalyzerService:
         
         return complaints
     
-    def _group_complaints(self, complaints: list[Complaint]) -> dict:
+    def _group_complaints(self, complaints: list[Complaint]) -> list[dict]:
         """
         Group complaints by item and issue.
         
@@ -137,7 +137,8 @@ class ReviewAnalyzerService:
             complaints: List of complaints
             
         Returns:
-            Nested dict: {item: {issue: {count, category}}}
+            List of food complaints with issues array:
+            [{"foodName": str, "issues": [{"issue": str, "count": int, "category": str}]}]
         """
         grouped: dict = defaultdict(lambda: defaultdict(lambda: {"count": 0, "category": ""}))
         
@@ -145,11 +146,23 @@ class ReviewAnalyzerService:
             grouped[complaint.item][complaint.issue]["count"] += 1
             grouped[complaint.item][complaint.issue]["category"] = complaint.category
         
-        # Convert defaultdict to regular dict
-        return {
-            item: dict(issues) 
-            for item, issues in grouped.items()
-        }
+        # Convert to new array format
+        result = []
+        for food_name, issues_dict in grouped.items():
+            issues_list = [
+                {
+                    "issue": issue,
+                    "count": data["count"],
+                    "category": data["category"]
+                }
+                for issue, data in issues_dict.items()
+            ]
+            result.append({
+                "foodName": food_name,
+                "issues": issues_list
+            })
+        
+        return result
     
     async def analyze(self, reviews: list[str]) -> dict:
         """
@@ -194,7 +207,6 @@ class ReviewAnalyzerService:
             "kept_reviews": len(kept_texts),
             "ignored_reviews": ignored,
             "total_complaints": len(complaints),
-            "complaints": [c.model_dump() for c in complaints],
             "complaints_grouped": grouped,
         }
     
