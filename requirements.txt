@@ -12,8 +12,8 @@ scikit-learn>=1.3.0
 joblib>=1.3.0
 numpy>=1.24.0
 
-# Optional: For review analyzer with Gemini
-google-generativeai>=0.3.0
+# Google Gemini API (new package)
+google-genai>=1.0.0
 
 # Development
 python-dotenv>=1.0.0

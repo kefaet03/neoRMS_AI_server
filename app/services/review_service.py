@@ -1,16 +1,17 @@
 """
 Review Analyzer Service.
-Extracts complaints from restaurant reviews.
+Extracts complaints from restaurant reviews using Google Gemini API.
 
-Note: The original AM4 module uses Google Gemini API for analysis.
-This service provides a mock implementation for local testing
-and can be configured to use the actual Gemini API.
+Uses the same implementation as AM4 module with Gemini 2.5 Flash (FREE tier).
+Supports Banglish, Bengali, and English reviews.
 """
 
+import json
 import logging
 import re
-from typing import Literal
+import time
 from collections import defaultdict
+from typing import Literal
 
 from ..schemas.review import Complaint
 
@@ -20,7 +21,44 @@ logger = logging.getLogger(__name__)
 # Complaint categories
 CATEGORIES = ["temperature", "taste", "quality", "cooking", "service", "hygiene", "other"]
 
-# Keywords for mock complaint extraction
+# Generic praise words to filter out
+GENERIC_PRAISE = {"ok", "good", "nice", "awesome"}
+
+# Negative keywords for prefilter signal detection
+NEGATIVE_KEYWORDS = {
+    "cold", "lukewarm", "too salty", "salty", "bland", "burnt", "raw",
+    "undercooked", "overcooked", "stale", "soggy", "greasy", "oily",
+    "dry", "hard", "rubbery", "smelly", "dirty", "hair", "late", "rude",
+    "thanda", "garam", "kharap", "baje"
+}
+
+# System prompt for Gemini (from AM4)
+GEMINI_SYSTEM_PROMPT = """You are a restaurant review analyzer that understands Banglish (Bengali + English), Bengali, and English.
+
+Extract ONLY complaints about food items or service.
+Ignore positive feedback completely.
+
+Output a JSON list where each object has:
+- "item": the food item name in English (e.g., "burger", "fries", "pizza", "biriyani")
+- "issue": the problem in English (e.g., "cold", "too salty", "burnt")
+- "category": one of ["temperature", "taste", "quality", "cooking", "service", "hygiene", "other"]
+
+Examples of Banglish complaints to understand:
+- "Pizza er edge jhule gase" → burnt edges
+- "Burger thanda chilo" → cold
+- "Beshi lobon diye" → too salty
+- "Chicken kachcha chilo" → undercooked/raw
+- "Service slow chilo" → slow service
+- "Waiter rude chilo" → rude service
+
+Rules:
+- Only extract complaints/negative feedback
+- If there are no complaints, return an empty list: []
+- Be concise with the issue description (use English)
+- One food item can have multiple issues
+- Understand Banglish, Bengali, and English reviews"""
+
+# Keywords for fallback mock extraction
 COMPLAINT_KEYWORDS = {
     "temperature": ["cold", "frozen", "lukewarm", "hot", "warm", "thanda", "garam", "heated"],
     "taste": ["tasteless", "bland", "bitter", "sour", "salty", "sweet", "spicy", "stale", "bad taste"],
@@ -30,7 +68,7 @@ COMPLAINT_KEYWORDS = {
     "hygiene": ["dirty", "unclean", "hair", "insect", "bug", "unhygienic", "contaminated"],
 }
 
-# Common food items
+# Common food items for fallback
 FOOD_ITEMS = [
     "burger", "pizza", "biryani", "chicken", "rice", "naan", "roti", "curry",
     "fries", "noodles", "pasta", "sandwich", "wrap", "steak", "fish", "prawn",
@@ -43,8 +81,9 @@ class ReviewAnalyzerService:
     """
     Service for analyzing restaurant reviews and extracting complaints.
     
-    This implementation uses keyword-based extraction for local testing.
-    For production, configure GEMINI_API_KEY to use the actual LLM.
+    Uses Google Gemini 2.5 Flash (FREE tier) for intelligent complaint extraction.
+    Supports Banglish, Bengali, and English reviews.
+    Falls back to keyword-based extraction if Gemini API is unavailable.
     """
     
     def __init__(self, use_llm: bool = False, api_key: str = None):
@@ -53,19 +92,41 @@ class ReviewAnalyzerService:
         
         Args:
             use_llm: Whether to use Gemini LLM (requires API key)
-            api_key: Gemini API key (optional)
+            api_key: Gemini API key
         """
-        self.use_llm = use_llm and api_key
+        self.use_llm = use_llm and bool(api_key)
         self.api_key = api_key
+        self.model_name = "gemini-2.5-flash"
         self._is_initialized = False
+        self._genai_client = None
         
     def initialize(self) -> None:
-        """Initialize the service."""
+        """Initialize the service and configure Gemini if API key is available."""
         if self._is_initialized:
             return
-            
-        logger.info(f"Review analyzer initialized (LLM mode: {self.use_llm})")
+        
+        if self.use_llm and self.api_key:
+            try:
+                from google import genai
+                self._genai_client = genai.Client(api_key=self.api_key)
+                logger.info(f"Review analyzer initialized with Gemini ({self.model_name})")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Gemini: {e}. Falling back to mock extraction.")
+                self.use_llm = False
+                self._genai_client = None
+        else:
+            logger.info("Review analyzer initialized (keyword-based fallback mode)")
+        
         self._is_initialized = True
+    
+    def _normalize_text(self, text: str) -> str:
+        """Normalize text for prefiltering."""
+        return re.sub(r"\s+", " ", text.strip().lower())
+    
+    def _has_negative_signal(self, text: str) -> bool:
+        """Check if text contains any negative keywords."""
+        normalized = self._normalize_text(text)
+        return any(keyword in normalized for keyword in NEGATIVE_KEYWORDS)
     
     def _prefilter(self, text: str) -> tuple[bool, str | None]:
         """
@@ -77,15 +138,109 @@ class ReviewAnalyzerService:
         Returns:
             Tuple of (keep, reason)
         """
-        if not text or len(text.strip()) < 10:
-            return False, "too_short"
+        normalized = self._normalize_text(text)
+        
+        # if len(normalized) < 10:
+        #     return False, "too_short"
+        
+        # if normalized in GENERIC_PRAISE:
+        #     return False, "generic_praise"
+        
         if len(text) > 5000:
             return False, "too_long"
+        
         return True, None
+    
+    def _extract_complaints_gemini(self, reviews: list[str]) -> list[Complaint]:
+        """
+        Extract complaints using Google Gemini API.
+        
+        Args:
+            reviews: List of review texts
+            
+        Returns:
+            List of extracted complaints
+        """
+        if not self._genai_client:
+            logger.warning("Gemini client not initialized, falling back to mock")
+            return self._extract_complaints_mock(reviews)
+        
+        # Format reviews as numbered list
+        reviews_text = "\n".join(f"{i+1}. {r}" for i, r in enumerate(reviews))
+        
+        prompt = f"""{GEMINI_SYSTEM_PROMPT}
+
+Analyze these {len(reviews)} restaurant reviews and extract complaints:
+
+{reviews_text}
+
+Return ONLY a valid JSON array, no other text. Example format:
+[{{"item": "burger", "issue": "cold", "category": "temperature"}}]
+"""
+        
+        # Retry with exponential backoff for rate limits
+        max_retries = 3
+        content = ""
+        
+        for attempt in range(max_retries):
+            try:
+                response = self._genai_client.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt
+                )
+                content = response.text.strip()
+                break
+            except Exception as e:
+                error_str = str(e)
+                error_type = type(e).__name__
+                
+                if "ResourceExhausted" in error_type or "429" in error_str:
+                    wait_time = (attempt + 1) * 2
+                    logger.warning(f"Gemini rate limited, waiting {wait_time}s...")
+                    time.sleep(wait_time)
+                    if attempt == max_retries - 1:
+                        logger.error(f"Gemini API rate limit exceeded after {max_retries} retries")
+                        return self._extract_complaints_mock(reviews)
+                else:
+                    logger.error(f"Gemini API error: {e}")
+                    return self._extract_complaints_mock(reviews)
+        
+        # Extract JSON from response (handle markdown code blocks)
+        if "```json" in content:
+            content = content.split("```json")[1].split("```")[0].strip()
+        elif "```" in content:
+            content = content.split("```")[1].split("```")[0].strip()
+        
+        # Parse JSON response
+        try:
+            data = json.loads(content)
+            if isinstance(data, dict):
+                data = data.get("complaints", data.get("results", []))
+            if not isinstance(data, list):
+                data = []
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse Gemini response as JSON: {e}")
+            data = []
+        
+        # Convert to Complaint objects
+        complaints: list[Complaint] = []
+        for item in data:
+            if isinstance(item, dict) and "item" in item and "issue" in item:
+                category = item.get("category", "other")
+                if category not in CATEGORIES:
+                    category = "other"
+                complaints.append(Complaint(
+                    item=item["item"],
+                    issue=item["issue"],
+                    category=category,
+                ))
+        
+        logger.info(f"Gemini extracted {len(complaints)} complaints from {len(reviews)} reviews")
+        return complaints
     
     def _extract_complaints_mock(self, reviews: list[str]) -> list[Complaint]:
         """
-        Extract complaints using keyword matching (mock implementation).
+        Extract complaints using keyword matching (fallback implementation).
         
         Args:
             reviews: List of review texts
@@ -127,6 +282,7 @@ class ReviewAnalyzerService:
                                 complaints.append(complaint)
                         break
         
+        logger.info(f"Fallback extraction found {len(complaints)} complaints from {len(reviews)} reviews")
         return complaints
     
     def _group_complaints(self, complaints: list[Complaint]) -> list[dict]:
@@ -168,6 +324,8 @@ class ReviewAnalyzerService:
         """
         Analyze reviews and extract complaints.
         
+        Uses Gemini API if configured, otherwise falls back to keyword-based extraction.
+        
         Args:
             reviews: List of review texts
             
@@ -189,13 +347,11 @@ class ReviewAnalyzerService:
                 continue
             kept_texts.append(text.strip())
         
-        # Extract complaints
-        if self.use_llm:
-            # TODO: Implement actual Gemini API call
-            complaints = self._extract_complaints_mock(kept_texts)
-            logger.info("Using mock extraction (LLM not fully implemented)")
+        # Extract complaints using Gemini or fallback
+        if self.use_llm and kept_texts:
+            complaints = self._extract_complaints_gemini(kept_texts)
         else:
-            complaints = self._extract_complaints_mock(kept_texts)
+            complaints = self._extract_complaints_mock(kept_texts) if kept_texts else []
         
         # Group complaints
         grouped = self._group_complaints(complaints)
