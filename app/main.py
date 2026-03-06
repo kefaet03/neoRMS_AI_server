@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from .config import settings
 from .routes import (
     health_router,
+    orders_router,
     recommendation_router,
     review_router,
     sentiment_router,
@@ -150,6 +151,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # Include routers
 app.include_router(health_router)
+app.include_router(orders_router)
 app.include_router(recommendation_router)
 app.include_router(review_router)
 app.include_router(sentiment_router)

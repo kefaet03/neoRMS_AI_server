@@ -212,11 +212,13 @@ def main():
     create_database()
     
     # Step 2: Pre-process and insert data
-    print("\n[2/3] Processing and inserting data...")
-    preprocess_and_insert_data()
+    # Commented out by default for development.
+    # Uncomment when you want to populate DB from RAW_ORDER_DATA.
+    # print("\n[2/3] Processing and inserting data...")
+    # preprocess_and_insert_data()
     
     # Step 3: View stats
-    print("\n[3/3] Verifying data...")
+    print("\n[2/2] Verifying data...")
     view_database_stats()
     
     # Example: Fetch order history for R1

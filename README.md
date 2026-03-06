@@ -81,6 +81,7 @@ uvicorn app.main:app --reload --port 8000
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/health` | Health check |
+| POST | `/orders/import` | Import raw order data into DB |
 | POST | `/recommend` | Get food recommendations |
 | POST | `/analyze-review` | Analyze reviews for complaints |
 | POST | `/sentiment` | Sentiment analysis |
